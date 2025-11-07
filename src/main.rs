@@ -155,9 +155,11 @@ fn get_url_variations(url: &str) -> Vec<String> {
 
     variations.push(format!("{base}.md"));
 
-    // Only add directory-based variations if URL doesn't have a file extension
+    // Only add .html.md and directory-based variations if URL doesn't have a file extension
     // This prevents file/directory conflicts (e.g., npm.html file vs npm.html/ directory)
+    // and avoids nonsensical double extensions (e.g., page.html.html.md)
     if !has_file_extension {
+        variations.push(format!("{base}.html.md"));
         variations.push(format!("{base}/index.md"));
         variations.push(format!("{base}/llms.txt"));
         variations.push(format!("{base}/llms-full.txt"));
@@ -229,29 +231,50 @@ async fn ensure_gitignore(base_dir: &Path) -> Result<(), Box<dyn std::error::Err
     Ok(())
 }
 
+/// Converts HTML to Markdown with fallback extraction:
+/// 1. Try Readability to extract `<main>`/`<article>` content
+/// 2. Fall back to `<body>` content if available
+/// 3. Fall back to full HTML as last resort
 fn html_to_markdown(html: &str, document_url: &str) -> Result<String, Box<dyn std::error::Error>> {
     if html.trim().is_empty() {
         return Err("HTML content is empty".into());
     }
 
-    // Step 1: Use dom_smoothie's Readability to clean the HTML
     let cfg = Config {
-        text_mode: TextMode::Raw, // We only need the cleaned HTML, not text extraction
+        text_mode: TextMode::Raw,
         ..Default::default()
     };
 
-    let mut readability = Readability::new(html, Some(document_url), Some(cfg))?;
-    let article = readability.parse()?;
+    let html_to_convert = Readability::new(html, Some(document_url), Some(cfg))
+        .ok()
+        .and_then(|mut r| r.parse().ok())
+        .and_then(|article| {
+            let cleaned = article.content;
+            (!cleaned.trim().is_empty()).then(|| cleaned.to_string())
+        })
+        .or_else(|| extract_body(html))
+        .unwrap_or_else(|| html.to_string());
 
-    // Step 2: Convert cleaned HTML to markdown using html2md
-    let cleaned_html = article.content.to_string();
-    let markdown = html2md::parse_html(&cleaned_html);
+    let markdown = html2md::parse_html(&html_to_convert);
 
     if markdown.trim().is_empty() {
         return Err("Extracted content is empty (page may have no readable content)".into());
     }
 
     Ok(markdown)
+}
+
+fn extract_body(html: &str) -> Option<String> {
+    let lower = html.to_lowercase();
+    let start = lower.find("<body")?;
+    let body_start = lower[start..].find('>')? + start + 1;
+    let body_end = lower.rfind("</body>")?;
+
+    if body_end >= body_start {
+        Some(html[body_start..body_end].to_string())
+    } else {
+        None
+    }
 }
 
 fn count_stats(content: &str) -> (usize, usize, usize) {
@@ -464,12 +487,13 @@ mod tests {
         let url = "https://example.com/docs";
         let variations = get_url_variations(url);
 
-        assert_eq!(variations.len(), 5);
+        assert_eq!(variations.len(), 6);
         assert_eq!(variations[0], "https://example.com/docs");
         assert_eq!(variations[1], "https://example.com/docs.md");
-        assert_eq!(variations[2], "https://example.com/docs/index.md");
-        assert_eq!(variations[3], "https://example.com/docs/llms.txt");
-        assert_eq!(variations[4], "https://example.com/docs/llms-full.txt");
+        assert_eq!(variations[2], "https://example.com/docs.html.md");
+        assert_eq!(variations[3], "https://example.com/docs/index.md");
+        assert_eq!(variations[4], "https://example.com/docs/llms.txt");
+        assert_eq!(variations[5], "https://example.com/docs/llms-full.txt");
     }
 
     #[test]
@@ -477,7 +501,7 @@ mod tests {
         let url = "https://github.com/user/repo/tree/main/docs";
         let variations = get_url_variations(url);
 
-        assert_eq!(variations.len(), 5);
+        assert_eq!(variations.len(), 6);
         assert_eq!(variations[0], "https://github.com/user/repo/tree/main/docs");
         assert_eq!(
             variations[1],
@@ -485,14 +509,18 @@ mod tests {
         );
         assert_eq!(
             variations[2],
-            "https://github.com/user/repo/tree/main/docs/index.md"
+            "https://github.com/user/repo/tree/main/docs.html.md"
         );
         assert_eq!(
             variations[3],
-            "https://github.com/user/repo/tree/main/docs/llms.txt"
+            "https://github.com/user/repo/tree/main/docs/index.md"
         );
         assert_eq!(
             variations[4],
+            "https://github.com/user/repo/tree/main/docs/llms.txt"
+        );
+        assert_eq!(
+            variations[5],
             "https://github.com/user/repo/tree/main/docs/llms-full.txt"
         );
     }
@@ -672,11 +700,11 @@ mod tests {
 
     #[test]
     fn test_url_variations_github_blob() {
-        // Note: .rs extension prevents directory-based variations (file/directory conflict prevention)
+        // Note: .rs extension prevents .html.md and directory variations
         let url = "https://github.com/user/repo/blob/main/src/lib.rs";
         let variations = get_url_variations(url);
 
-        // Should have: original + .md (no directory variations due to .rs extension)
+        // Should have: original + .md (no .html.md or directory variations due to .rs extension)
         assert_eq!(variations.len(), 2);
         assert_eq!(
             variations[0],
@@ -686,6 +714,17 @@ mod tests {
             variations[1],
             "https://github.com/user/repo/blob/main/src/lib.rs.md"
         );
+    }
+
+    #[test]
+    fn test_url_variations_html_file() {
+        // HTML files should not get .html.md variation (prevents page.html.html.md)
+        let url = "https://example.com/page.html";
+        let variations = get_url_variations(url);
+
+        assert_eq!(variations.len(), 2);
+        assert_eq!(variations[0], "https://example.com/page.html");
+        assert_eq!(variations[1], "https://example.com/page.html.md");
     }
 
     #[test]
@@ -718,8 +757,7 @@ mod tests {
         // Slashes in query should be replaced with underscores
         assert!(
             path_str1.contains("path=.._etc_passwd"),
-            "Path was: {}",
-            path_str1
+            "Path was: {path_str1}"
         );
 
         // Test that other unsafe chars (colons, question marks, etc.) get sanitized
@@ -730,8 +768,7 @@ mod tests {
         // Colons and question marks should be replaced with underscores
         assert!(
             path_str2.contains("file_name_test"),
-            "Path was: {}",
-            path_str2
+            "Path was: {path_str2}"
         );
 
         // Test that backslashes in query params get sanitized
@@ -742,8 +779,102 @@ mod tests {
         // Backslashes should be replaced with underscores
         assert!(
             path_str3.contains("path=.._etc_passwd"),
-            "Path was: {}",
-            path_str3
+            "Path was: {path_str3}"
         );
+    }
+
+    #[test]
+    fn test_html_to_markdown_fallback() {
+        let html_with_main = r"
+            <html>
+                <head><title>Test</title></head>
+                <body>
+                    <main>
+                        <h1>Main Content</h1>
+                        <p>This has a main tag.</p>
+                    </main>
+                </body>
+            </html>
+        ";
+
+        let result_with_main = html_to_markdown(html_with_main, "https://example.com");
+        assert!(result_with_main.is_ok());
+        let markdown_with_main = result_with_main.unwrap();
+        assert!(markdown_with_main.contains("Main Content"));
+
+        let html_without_main = r"
+            <html>
+                <head><title>Test</title></head>
+                <body>
+                    <h1>No Main Tag</h1>
+                    <p>This page doesn't have a main or article tag.</p>
+                    <div>
+                        <h2>Subsection</h2>
+                        <p>More content here.</p>
+                    </div>
+                </body>
+            </html>
+        ";
+
+        let result_without_main = html_to_markdown(html_without_main, "https://example.com");
+        assert!(result_without_main.is_ok());
+        let markdown_without_main = result_without_main.unwrap();
+        assert!(markdown_without_main.contains("No Main Tag"));
+        assert!(markdown_without_main.contains("Subsection"));
+    }
+
+    #[test]
+    fn test_html_to_markdown_edge_cases() {
+        // Empty HTML
+        assert!(html_to_markdown("", "https://example.com").is_err());
+
+        // Whitespace-only HTML
+        assert!(html_to_markdown("   \n\t   ", "https://example.com").is_err());
+
+        // HTML with only scripts/styles (produces empty markdown)
+        let script_only = r"
+            <html>
+                <head><script>console.log('test');</script></head>
+                <body><script>alert('hi');</script></body>
+            </html>
+        ";
+        let result = html_to_markdown(script_only, "https://example.com");
+        // This might succeed with minimal content or fail - either is acceptable
+        if let Ok(md) = result {
+            assert!(!md.trim().is_empty());
+        }
+
+        // Malformed HTML (unclosed tags) - html2md handles this gracefully
+        let malformed = "<div><p>unclosed tags<h1>Header";
+        let result = html_to_markdown(malformed, "https://example.com");
+        assert!(result.is_ok());
+        assert!(result.unwrap().contains("Header"));
+    }
+
+    #[test]
+    fn test_extract_body() {
+        // Standard body tag
+        let html = "<html><head><title>Test</title></head><body><p>Content</p></body></html>";
+        let body = extract_body(html);
+        assert!(body.is_some());
+        assert_eq!(body.unwrap(), "<p>Content</p>");
+
+        // Body with attributes
+        let html_attrs = r#"<html><body class="main" id="content"><div>Text</div></body></html>"#;
+        let body_attrs = extract_body(html_attrs);
+        assert!(body_attrs.is_some());
+        assert_eq!(body_attrs.unwrap(), "<div>Text</div>");
+
+        // No body tag
+        assert!(extract_body("<html><div>No body</div></html>").is_none());
+
+        // Empty body
+        let empty = "<html><body></body></html>";
+        let body_empty = extract_body(empty);
+        assert!(body_empty.is_some());
+        assert_eq!(body_empty.unwrap(), "");
+
+        // Malformed (no closing body)
+        assert!(extract_body("<html><body><p>Content").is_none());
     }
 }

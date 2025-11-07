@@ -394,7 +394,7 @@ mod tests {
         assert_eq!(headings7.len(), 0); // Filtered out entirely
 
         // Heading with only hashes and empty link should be filtered
-        let md8 = "### [​](#anchor)";
+        let md8 = "### [\u{200B}](#anchor)";
         let headings8 = extract_headings(md8);
         assert_eq!(headings8.len(), 0);
     }
@@ -437,10 +437,10 @@ mod tests {
     #[test]
     fn test_headings_with_inline_formatting() {
         // Headings with bold, italic, code, and links preserved exactly
-        let md = r#"## **Bold** heading
+        let md = r"## **Bold** heading
 ### Heading with `code`
 #### Heading with *italic* text
-##### Mix **bold** and `code` and [link](url)"#;
+##### Mix **bold** and `code` and [link](url)";
         let headings = extract_headings(md);
         assert_eq!(headings.len(), 4);
         assert_eq!(headings[0].text, "## **Bold** heading");
@@ -539,7 +539,7 @@ mod tests {
     #[test]
     fn test_deeply_nested_levels() {
         // Verify all 6 heading levels are recognized
-        let md = r#"# Main
+        let md = r"# Main
 
 ## Level 2
 
@@ -550,7 +550,7 @@ mod tests {
 ##### Level 5
 
 ###### Level 6
-"#;
+";
         let headings = extract_headings(md);
         assert_eq!(headings.len(), 6);
         assert_eq!(headings[0].level, 1);
@@ -807,7 +807,7 @@ mod tests {
             // Convex full has H4/H5 nesting - test with budget allowing deeper levels
             let md = include_str!("../test-fixtures/convex-llms-full.txt");
             let config = TocConfig {
-                toc_budget: 100000,
+                toc_budget: 100_000,
                 full_content_threshold: 8000,
             };
             let toc = generate_toc(md, md.len(), &config);
@@ -883,7 +883,7 @@ mod tests {
             };
             let high_threshold = TocConfig {
                 toc_budget: 1000,
-                full_content_threshold: 100000,
+                full_content_threshold: 100_000,
             };
 
             let toc_low = generate_toc(md, md.len(), &low_threshold);
