@@ -1,6 +1,6 @@
 [package]
 name = "llms-fetch-mcp"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 description = "llms.txt-aware MCP server - fetches and caches web content in LLM-friendly formats"
 license = "MIT"
