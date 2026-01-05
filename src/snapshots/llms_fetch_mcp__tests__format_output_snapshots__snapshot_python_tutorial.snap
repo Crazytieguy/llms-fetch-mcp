@@ -1,0 +1,14 @@
+---
+source: src/main.rs
+expression: format_output(&files)
+---
+## https://docs.python.org/3/tutorial/index.html
+Saved to: .llms-fetch-mcp/docs.python.org/3/tutorial/index.html
+Type: html-converted (627 lines, 2877 words, 18239 chars)
+
+### Table of Contents
+  29→3.1. Using Python as a Calculator
+  35→### 3.1.1. Numbers ###
+ 141→### 3.1.2. Text ###
+ 418→### 3.1.3. Lists ###
+ 552→3.2. First Steps Towards Programming

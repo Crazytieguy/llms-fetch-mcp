@@ -1,0 +1,7 @@
+---
+source: src/main.rs
+expression: format_output(&files)
+---
+## https://www.solidjs.com/guides/getting-started
+Saved to: .llms-fetch-mcp/www.solidjs.com/guides/getting-started/index
+Type: html-converted (60 lines, 240 words, 1798 chars)

@@ -207,7 +207,7 @@ fn extract_headings(markdown: &str) -> Vec<Heading> {
                         headings.push(Heading {
                             level: level_num,
                             line_number: heading.line_number,
-                            text: text.to_string(),
+                            text: text.clone(),
                         });
                     }
                 }

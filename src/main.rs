@@ -7,11 +7,14 @@ use dom_smoothie::{Config, Readability, TextMode};
 use rmcp::handler::server::ServerHandler;
 use rmcp::handler::server::tool::ToolRouter;
 use rmcp::handler::server::wrapper::Parameters;
-use rmcp::model::{Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
+use rmcp::model::{
+    CallToolResult, Content, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo,
+};
 use rmcp::{ErrorData as McpError, ServiceExt, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
@@ -45,7 +48,7 @@ struct FetchInput {
     url: String,
 }
 
-#[derive(Debug, Serialize, JsonSchema)]
+#[derive(Debug)]
 struct FileInfo {
     path: String,
     source_url: String,
@@ -53,13 +56,7 @@ struct FileInfo {
     lines: usize,
     words: usize,
     characters: usize,
-    #[serde(skip_serializing_if = "Option::is_none")]
     table_of_contents: Option<String>,
-}
-
-#[derive(Debug, Serialize, JsonSchema)]
-struct FetchOutput {
-    files: Vec<FileInfo>,
 }
 
 #[derive(Debug)]
@@ -284,6 +281,39 @@ fn count_stats(content: &str) -> (usize, usize, usize) {
     (lines, words, characters)
 }
 
+/// Format file infos as human-readable text for LLM consumption.
+fn format_output(files: &[FileInfo]) -> String {
+    use std::fmt::Write;
+
+    if files.is_empty() {
+        return String::from("No files fetched.");
+    }
+
+    let mut output = String::new();
+
+    for (i, f) in files.iter().enumerate() {
+        if i > 0 {
+            writeln!(output).unwrap();
+        }
+        writeln!(output, "## {}", f.source_url).unwrap();
+        writeln!(output, "Saved to: {}", f.path).unwrap();
+        writeln!(
+            output,
+            "Type: {} ({} lines, {} words, {} chars)",
+            f.content_type, f.lines, f.words, f.characters
+        )
+        .unwrap();
+
+        if let Some(toc) = &f.table_of_contents {
+            writeln!(output).unwrap();
+            writeln!(output, "### Table of Contents").unwrap();
+            writeln!(output, "{toc}").unwrap();
+        }
+    }
+
+    output.trim_end().to_string()
+}
+
 #[tool_router]
 impl FetchServer {
     fn new(cache_dir: Option<PathBuf>, toc_budget: usize, toc_threshold: usize) -> Self {
@@ -309,10 +339,7 @@ impl FetchServer {
     #[tool(
         description = "Use to access documentation and guides from the web. Start with documentation root URLs (e.g., https://docs.example.com) - the tool discovers llms.txt files and tries multiple formats (.md, /index.md, /llms.txt, /llms-full.txt). Content is converted to markdown and cached locally. Returns file path with table of contents for navigation. For GitHub files, use raw.githubusercontent.com URLs for best results."
     )]
-    async fn fetch(
-        &self,
-        params: Parameters<FetchInput>,
-    ) -> Result<rmcp::Json<FetchOutput>, McpError> {
+    async fn fetch(&self, params: Parameters<FetchInput>) -> Result<CallToolResult, McpError> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
             .build()
@@ -334,8 +361,8 @@ impl FetchServer {
         let mut results = Vec::new();
         let mut errors = Vec::new();
         for task in fetch_tasks {
-            if let Ok(attempt) = task.await {
-                match attempt {
+            match task.await {
+                Ok(attempt) => match attempt {
                     FetchAttempt::Success(result) => results.push(result),
                     FetchAttempt::HttpError { url, status } => {
                         errors.push(format!("{url}: HTTP {status}"));
@@ -343,6 +370,9 @@ impl FetchServer {
                     FetchAttempt::NetworkError { url } => {
                         errors.push(format!("{url}: network error"));
                     }
+                },
+                Err(e) => {
+                    errors.push(format!("task panicked: {e}"));
                 }
             }
         }
@@ -367,7 +397,7 @@ impl FetchServer {
         })?;
 
         let mut file_infos = Vec::new();
-        let mut seen_content: HashSet<String> = HashSet::new();
+        let mut seen_hashes: HashSet<u64> = HashSet::new();
 
         let has_non_html = results.iter().any(|r| !r.is_html);
 
@@ -400,14 +430,15 @@ impl FetchServer {
                 result.content.clone()
             };
 
-            // Deduplicate content by comparing full strings
-            if !seen_content.insert(content_to_save.clone()) {
-                // Already seen this content, skip it
+            let mut hasher = DefaultHasher::new();
+            content_to_save.hash(&mut hasher);
+            if !seen_hashes.insert(hasher.finish()) {
                 continue;
             }
 
-            let file_path = url_to_path(&self.cache_dir, &result.url)
-                .map_err(|e| McpError::internal_error(format!("Failed to parse URL: {e}"), None))?;
+            let file_path = url_to_path(&self.cache_dir, &result.url).map_err(|e| {
+                McpError::internal_error(format!("Failed to create cache path: {e}"), None)
+            })?;
 
             if let Some(parent) = file_path.parent() {
                 fs::create_dir_all(parent).await.map_err(|e| {
@@ -444,7 +475,9 @@ impl FetchServer {
             });
         }
 
-        Ok(rmcp::Json(FetchOutput { files: file_infos }))
+        let text_output = format_output(&file_infos);
+
+        Ok(CallToolResult::success(vec![Content::text(text_output)]))
     }
 }
 
@@ -876,5 +909,159 @@ mod tests {
 
         // Malformed (no closing body)
         assert!(extract_body("<html><body><p>Content").is_none());
+    }
+
+    mod format_output_snapshots {
+        use super::*;
+        use crate::toc::{self, TocConfig};
+
+        /// Create FileInfo from a real test fixture file
+        fn file_info_from_fixture(
+            fixture_name: &str,
+            source_url: &str,
+            cache_path: &str,
+            content_type: &str,
+            toc_config: &TocConfig,
+        ) -> FileInfo {
+            let content = std::fs::read_to_string(format!("test-fixtures/{fixture_name}")).unwrap();
+            let (lines, words, characters) = count_stats(&content);
+            let table_of_contents = toc::generate_toc(&content, characters, toc_config);
+
+            FileInfo {
+                path: cache_path.to_string(),
+                source_url: source_url.to_string(),
+                content_type: content_type.to_string(),
+                lines,
+                words,
+                characters,
+                table_of_contents,
+            }
+        }
+
+        #[test]
+        fn snapshot_react_learn() {
+            let config = TocConfig::default();
+            let files = vec![file_info_from_fixture(
+                "react-learn.txt",
+                "https://react.dev/learn",
+                ".llms-fetch-mcp/react.dev/learn/index",
+                "html-converted",
+                &config,
+            )];
+            insta::assert_snapshot!(format_output(&files));
+        }
+
+        #[test]
+        fn snapshot_nextjs_llms() {
+            let config = TocConfig::default();
+            let files = vec![file_info_from_fixture(
+                "nextjs-llms.txt",
+                "https://nextjs.org/llms.txt",
+                ".llms-fetch-mcp/nextjs.org/llms.txt",
+                "llms",
+                &config,
+            )];
+            insta::assert_snapshot!(format_output(&files));
+        }
+
+        #[test]
+        fn snapshot_python_tutorial() {
+            let config = TocConfig {
+                toc_budget: 4000,
+                full_content_threshold: 2000,
+            };
+            let files = vec![file_info_from_fixture(
+                "python-tutorial.txt",
+                "https://docs.python.org/3/tutorial/index.html",
+                ".llms-fetch-mcp/docs.python.org/3/tutorial/index.html",
+                "html-converted",
+                &config,
+            )];
+            insta::assert_snapshot!(format_output(&files));
+        }
+
+        #[test]
+        fn snapshot_multiple_files_convex() {
+            // Simulate fetching a URL that returns both index.md and llms.txt
+            let config = TocConfig::default();
+            let files = vec![
+                file_info_from_fixture(
+                    "convex-excerpt.txt",
+                    "https://docs.convex.dev/index.md",
+                    ".llms-fetch-mcp/docs.convex.dev/index.md",
+                    "markdown",
+                    &config,
+                ),
+                file_info_from_fixture(
+                    "nextjs-llms.txt", // Using as stand-in for llms.txt
+                    "https://docs.convex.dev/llms.txt",
+                    ".llms-fetch-mcp/docs.convex.dev/llms.txt",
+                    "llms",
+                    &config,
+                ),
+            ];
+            insta::assert_snapshot!(format_output(&files));
+        }
+
+        #[test]
+        fn snapshot_small_file_no_toc() {
+            // Small file that won't generate a ToC due to threshold
+            let config = TocConfig::default(); // 8000 char threshold
+            let files = vec![file_info_from_fixture(
+                "solidjs-quickstart.txt",
+                "https://www.solidjs.com/guides/getting-started",
+                ".llms-fetch-mcp/www.solidjs.com/guides/getting-started/index",
+                "html-converted",
+                &config,
+            )];
+            insta::assert_snapshot!(format_output(&files));
+        }
+
+        #[test]
+        fn snapshot_mixed_toc_presence() {
+            // One file with ToC (large), one without (small)
+            let large_config = TocConfig::default();
+            let small_config = TocConfig {
+                toc_budget: 4000,
+                full_content_threshold: 100_000, // Won't generate ToC
+            };
+            let files = vec![
+                file_info_from_fixture(
+                    "react-learn.txt",
+                    "https://react.dev/learn",
+                    ".llms-fetch-mcp/react.dev/learn/index",
+                    "html-converted",
+                    &large_config,
+                ),
+                file_info_from_fixture(
+                    "solidjs-quickstart.txt",
+                    "https://www.solidjs.com/guides/getting-started",
+                    ".llms-fetch-mcp/www.solidjs.com/guides/getting-started/index",
+                    "html-converted",
+                    &small_config,
+                ),
+            ];
+            insta::assert_snapshot!(format_output(&files));
+        }
+
+        #[test]
+        fn snapshot_empty_result() {
+            let files: Vec<FileInfo> = vec![];
+            insta::assert_snapshot!(format_output(&files));
+        }
+
+        #[test]
+        fn snapshot_llms_full() {
+            // Large llms-full.txt file - won't have ToC due to budget constraints
+            let config = TocConfig::default();
+            let files = vec![file_info_from_fixture(
+                "astro-llms-full.txt",
+                "https://docs.astro.build/llms-full.txt",
+                ".llms-fetch-mcp/docs.astro.build/llms-full.txt",
+                "llms-full",
+                &config,
+            )];
+            insta::assert_snapshot!(format_output(&files));
+        }
     }
 }

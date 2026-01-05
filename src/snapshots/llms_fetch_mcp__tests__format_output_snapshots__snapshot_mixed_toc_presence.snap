@@ -1,0 +1,25 @@
+---
+source: src/main.rs
+expression: format_output(&files)
+---
+## https://react.dev/learn
+Saved to: .llms-fetch-mcp/react.dev/learn/index
+Type: html-converted (369 lines, 2265 words, 19087 chars)
+
+### Table of Contents
+   3→### You will learn ###
+  12→Creating and nesting components
+  55→Writing markup with JSX
+  68→Adding styles
+  85→Displaying data
+ 130→Conditional rendering
+ 153→Rendering lists
+ 198→Responding to events
+ 209→Updating the screen
+ 269→Using Hooks
+ 276→Sharing data between components
+ 364→Next Steps
+
+## https://www.solidjs.com/guides/getting-started
+Saved to: .llms-fetch-mcp/www.solidjs.com/guides/getting-started/index
+Type: html-converted (60 lines, 240 words, 1798 chars)

@@ -1,0 +1,7 @@
+---
+source: src/main.rs
+expression: format_output(&files)
+---
+## https://docs.astro.build/llms-full.txt
+Saved to: .llms-fetch-mcp/docs.astro.build/llms-full.txt
+Type: llms-full (73088 lines, 302839 words, 2495893 chars)

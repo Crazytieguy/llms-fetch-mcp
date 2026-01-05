@@ -1,0 +1,29 @@
+---
+source: src/main.rs
+expression: format_output(&files)
+---
+## https://docs.convex.dev/index.md
+Saved to: .llms-fetch-mcp/docs.convex.dev/index.md
+Type: markdown (150 lines, 1062 words, 9348 chars)
+
+### Table of Contents
+   1→# Convex Documentation
+   6→## understanding
+  16→## quickstart
+  34→## functions
+  51→## database
+  73→## realtime
+  79→## auth
+  95→## scheduling
+ 103→## file-storage
+ 114→## search
+ 122→## components
+ 129→## ai
+ 139→## agents
+
+## https://docs.convex.dev/llms.txt
+Saved to: .llms-fetch-mcp/docs.convex.dev/llms.txt
+Type: llms (387 lines, 898 words, 33566 chars)
+
+### Table of Contents
+  1→# Next.js Documentation

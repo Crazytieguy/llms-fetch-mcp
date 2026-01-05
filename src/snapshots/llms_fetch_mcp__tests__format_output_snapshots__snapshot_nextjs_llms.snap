@@ -1,0 +1,10 @@
+---
+source: src/main.rs
+expression: format_output(&files)
+---
+## https://nextjs.org/llms.txt
+Saved to: .llms-fetch-mcp/nextjs.org/llms.txt
+Type: llms (387 lines, 898 words, 33566 chars)
+
+### Table of Contents
+  1→# Next.js Documentation
