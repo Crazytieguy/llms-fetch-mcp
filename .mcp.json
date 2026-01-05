@@ -1,7 +1,8 @@
 {
   "mcpServers": {
-    "llms-fetch": {
-      "command": "./target/debug/llms-fetch-mcp"
+    "llms-fetch-debug": {
+      "command": "cargo",
+      "args": ["run"]
     }
   }
 }

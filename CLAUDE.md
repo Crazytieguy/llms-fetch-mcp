@@ -1,13 +1,9 @@
 # Development Guidelines
 
 ## Quality Gates
-- Run `cargo fmt && cargo clippy -- -D warnings && cargo test` before commits
+- Run `cargo fmt`, `cargo clippy`, and `cargo test` before commits
 - Launch review agents in parallel for complex changes, iterate until positive reviews
 - Build debug version after changes (`cargo build`), then ask user to restart for testing
-
-## Testing & Security
-- Add tests if they provide value (no "not critical for this version" mentality)
-- Take security issues seriously - fix vulnerabilities regardless of perceived risk
 
 ## Dependencies & Documentation
 - Add dependencies with `cargo add <crate>` to get latest versions

@@ -458,11 +458,7 @@ impl FetchServer {
             let (lines, words, characters) = count_stats(&content_to_save);
 
             let table_of_contents =
-                if content_type.contains("markdown") || content_type == "html-converted" {
-                    toc::generate_toc(&content_to_save, characters, &self.toc_config)
-                } else {
-                    None
-                };
+                toc::generate_toc(&content_to_save, characters, &self.toc_config);
 
             file_infos.push(FileInfo {
                 path: file_path.to_string_lossy().to_string(),
