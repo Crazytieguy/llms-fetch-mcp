@@ -57,6 +57,7 @@ struct FileInfo {
     words: usize,
     characters: usize,
     table_of_contents: Option<String>,
+    content: Option<String>, // Full content for small files (below ToC threshold)
 }
 
 #[derive(Debug)]
@@ -308,6 +309,10 @@ fn format_output(files: &[FileInfo]) -> String {
             writeln!(output).unwrap();
             writeln!(output, "### Table of Contents").unwrap();
             writeln!(output, "{toc}").unwrap();
+        } else if let Some(content) = &f.content {
+            writeln!(output).unwrap();
+            writeln!(output, "### Content").unwrap();
+            writeln!(output, "{content}").unwrap();
         }
     }
 
@@ -460,6 +465,13 @@ impl FetchServer {
             let table_of_contents =
                 toc::generate_toc(&content_to_save, characters, &self.toc_config);
 
+            // For small files (below ToC threshold), include full content inline
+            let content = if characters < self.toc_config.full_content_threshold {
+                Some(content_to_save)
+            } else {
+                None
+            };
+
             file_infos.push(FileInfo {
                 path: file_path.to_string_lossy().to_string(),
                 source_url: result.url.clone(),
@@ -468,6 +480,7 @@ impl FetchServer {
                 words,
                 characters,
                 table_of_contents,
+                content,
             });
         }
 
@@ -919,9 +932,15 @@ mod tests {
             content_type: &str,
             toc_config: &TocConfig,
         ) -> FileInfo {
-            let content = std::fs::read_to_string(format!("test-fixtures/{fixture_name}")).unwrap();
-            let (lines, words, characters) = count_stats(&content);
-            let table_of_contents = toc::generate_toc(&content, characters, toc_config);
+            let file_content =
+                std::fs::read_to_string(format!("test-fixtures/{fixture_name}")).unwrap();
+            let (lines, words, characters) = count_stats(&file_content);
+            let table_of_contents = toc::generate_toc(&file_content, characters, toc_config);
+            let content = if characters < toc_config.full_content_threshold {
+                Some(file_content)
+            } else {
+                None
+            };
 
             FileInfo {
                 path: cache_path.to_string(),
@@ -931,6 +950,7 @@ mod tests {
                 words,
                 characters,
                 table_of_contents,
+                content,
             }
         }
 
