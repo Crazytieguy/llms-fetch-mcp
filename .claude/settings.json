@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo:*)",
+      "WebSearch",
+      "mcp__llms-fetch-debug__fetch",
+      "Edit",
+      "Write"
+    ]
+  }
+}
