@@ -342,7 +342,7 @@ impl FetchServer {
     }
 
     #[tool(
-        description = "Use to access documentation and guides from the web. Start with documentation root URLs (e.g., https://docs.example.com) - the tool discovers llms.txt files and tries multiple formats (.md, /index.md, /llms.txt, /llms-full.txt). Content is converted to markdown and cached locally. Returns file path with table of contents for navigation. For GitHub files, use raw.githubusercontent.com URLs for best results."
+        description = "Use to access documentation and guides from the web. Start with documentation root URLs (e.g., https://docs.example.com) - the tool automatically discovers llms.txt files and tries multiple formats (.md, /index.md, /llms.txt, /llms-full.txt), so you don't need to explicitly request /llms.txt. Content is converted to markdown and cached locally. Returns file path with table of contents for navigation. For GitHub files, use raw.githubusercontent.com URLs for best results."
     )]
     async fn fetch(&self, params: Parameters<FetchInput>) -> Result<CallToolResult, McpError> {
         let client = reqwest::Client::builder()
@@ -498,7 +498,7 @@ impl ServerHandler for FetchServer {
             capabilities: ServerCapabilities::builder().enable_tools().build(),
             server_info: Implementation::from_build_env(),
             instructions: Some(
-                "Web content fetcher with intelligent format detection for documentation. Cleans HTML and converts to Markdown. Generates table of contents for navigation. Deduplicates content automatically."
+                "Web content fetcher with intelligent format detection for documentation. Automatically discovers llms.txt files - just provide the root URL. Cleans HTML and converts to Markdown. Generates table of contents for navigation. Deduplicates content automatically."
                     .to_string(),
             ),
         }
